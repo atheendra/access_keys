@@ -129,7 +129,6 @@ def hash_password(password):
     return passlib.hash.sha512_crypt.encrypt(
         password_utf8, rounds=CONF.crypt_strength)
 
-
 def ldap_hash_password(password):
     """Hash a password. Hard."""
     password_utf8 = trunc_password(password).encode('utf-8')
@@ -546,10 +545,11 @@ def make_dirs(path, mode=None, user=None, group=None, log=None):
     set_permissions(path, mode, user, group, log)
 
 
-def generate_access_key_secret():
-    return base64.b32encode(os.urandom(20))
+def generate_access_key_secret(secret):
+    return passlib.hash.sha512_crypt.encrypt(
+        secret, rounds=CONF.crypt_strength)
 
-
-def check_access_key(access_key, hashed):
-    hashed_ak = hashlib.sha256(access_key).hexdigest()
-    return hashed_ak == hashed
+def check_access_key(access_key_secret, hashed):
+    if access_key_secret is None or hashed is None:
+        return False
+    return passlib.hash.sha512_crypt.verify(access_key_secret, hashed)

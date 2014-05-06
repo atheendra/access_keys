@@ -18,6 +18,7 @@ from keystone.common import utils
 from keystone import exception
 from keystone import identity
 from keystone.openstack.common.gettextutils import _
+import uuid
 
 # Import assignment sql to ensure that the models defined in there are
 # available for the reference from User and Group to Domain.id.
@@ -31,6 +32,7 @@ class AccessKey(sql.ModelBase, sql.DictBase):
     user_id = sql.Column(sql.String(64), sql.ForeignKey('user.id'),
                          nullable=False)
     access_key_secret = sql.Column(sql.String(128))
+    extra = sql.Column(sql.JsonBlob())
 
 
 class User(sql.ModelBase, sql.DictBase):
@@ -121,28 +123,62 @@ class Identity(identity.Driver):
             user_ref = self._get_user_from_ak(session, access_key_id)
         except exception.UserNotFound:
             raise AssertionError(_('Invalid access key'))
-        if not self._check_access_key_secret(access_key_secret, access_key_id):
+        if not self._check_access_key_secret(session, access_key_secret, access_key_id):
             raise AssertionError(_('Invalid access key'))
         #return identity.filter_user(user_ref.to_dict())
         return user_ref
     # user crud
 
     def _get_user_from_ak(self, session, access_key_id):
-        user_ref = session.query(AccessKey).get(access_key_id)
+        access_key_ref = session.query(AccessKey).get(access_key_id)
+        user_ref = session.query(User).get(access_key_ref.get('user_id'))
 
         if not user_ref:
             raise exception.UserNotFound
         return user_ref
 
-    def _check_access_key_secret(self, secret, ak_id):
-        if secret == "quyNVz7gMtpG9QsLz0DUrqGocYbr5X+KGbkJsqzs":
-            return True
-        else:
+    def _check_access_key_secret(self, session, secret, ak_id):
+        query = session.query(AccessKey)
+        query = query.filter_by(id=ak_id)
+        query = query.first()
+        if not query:
             return False
+        actual_secret = query['access_key_secret']
+        return utils.check_access_key(secret, actual_secret)
+
+    def _check_duplicate_access_key(self, session, ak_id):
+        if ak_id is None:
+            return True
+        user_ref = session.query(AccessKey).get(ak_id)
+        return user_ref is not None
+
+    def create_access_key(self, user_id):
+        access_key_id = None
+        session = sql.get_session()
+
+        #Generate unique Access Key
+        while self._check_duplicate_access_key(session, access_key_id):
+            access_key_id = uuid.uuid4().hex
+
+        access_key_secret = uuid.uuid4().hex
+        access_key_hashed = utils.generate_access_key_secret(access_key_secret)
+
+        ak = {
+            'id': access_key_id,
+            'user_id': user_id,
+            'access_key_secret': access_key_hashed}
+
+        access_key_ref = AccessKey.from_dict(ak)
+
+        with session.begin():
+            session.add(access_key_ref)
+        return access_key_secret
+
 
     @sql.handle_conflicts(conflict_type='user')
     def create_user(self, user_id, user):
         user = utils.hash_user_password(user)
+        self.create_access_key(user.get('id'))
         session = sql.get_session()
         with session.begin():
             user_ref = User.from_dict(user)

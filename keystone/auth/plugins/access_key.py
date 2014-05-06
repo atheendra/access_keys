@@ -19,6 +19,7 @@ from keystone import exception
 from keystone.common import dependency
 from keystone import identity
 from keystone.openstack.common import log as logging
+from keystone.openstack.common.gettextutils import _
 
 
 METHOD_NAME = 'access_key'
@@ -51,29 +52,13 @@ class AccessKey(auth.AuthMethodHandler):
         access_key_info = AccessKeyAuthInfo(auth_payload)
 
         try:
-            self.identity_api.authenticate_ak(
-                access_key_id=access_key_info.access_id,
-                access_key_secret=access_key_info.secret
-            )
+            user_ref = self.identity_api.authenticate_ak(
+                            access_key_id=access_key_info.access_id,
+                            access_key_secret=access_key_info.secret
+                       )
         except AssertionError as e:
-            msg = _(str(e))
-            raise exception.Unauthorized(msg)
-
-        user_context["user_id"] = "e95252ec01334813a27c2272ca4687cb"
-
-        """Try to authenticate against the identity backend.
-        user_info = UserAuthInfo(auth_payload)
-
-        try:
-            self.identity_api.authenticate_with_tfa(
-                user_id=user_info.user_id,
-                password=user_info.password,
-                tfa_password=user_info.tfa_password)
-        except AssertionError as e:
-            # TODO: maybe it's better to distinguish between invalid username/password
-            # and invalid second-factor password
-            msg = _(str(e))
+            msg = _(unicode(e))
             raise exception.Unauthorized(msg)
 
         if 'user_id' not in user_context:
-            user_context['user_id'] = user_info.user_id"""
+            user_context['user_id'] = user_ref.get('id')

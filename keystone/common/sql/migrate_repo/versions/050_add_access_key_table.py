@@ -13,6 +13,7 @@
 # under the License.
 
 import sqlalchemy as sql
+from keystone.common import sql as ks_sql
 
 
 def upgrade(migrate_engine):
@@ -24,6 +25,7 @@ def upgrade(migrate_engine):
         meta,
         sql.Column('id', sql.String(64), primary_key=True),
         sql.Column('user_id', sql.String(64), nullable=False),
+        sql.Column('extra', ks_sql.JsonBlob.impl),
         sql.Column('access_key_secret', sql.String(256)))
     access_key_table.create(migrate_engine, checkfirst=True)
 
