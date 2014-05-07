@@ -30,6 +30,12 @@ from keystone import exception
 from keystone.openstack.common.gettextutils import _
 from keystone.openstack.common import jsonutils
 from keystone import token
+from keystone.token import core
+from keystone import config
+from keystone.openstack.common import log
+
+CONF = config.CONF
+LOG = log.getLogger(__name__)
 
 @dependency.requires('assignment_api', 'catalog_api', 'credential_api',
                      'identity_api', 'token_api')
@@ -158,18 +164,63 @@ class AccessKeyControllerCommon(object):
         return self._convert_v3_to_ec2_credential(creds)
 
 
-@dependency.requires('policy_api', 'token_provider_api')
-class AccessKeyController(AccessKeyControllerCommon, controller.V2Controller):
+@dependency.requires('policy_api', 'token_provider_api', 'identity_api')
+class AccessKeyController(controller.V2Controller):
+
+    def _get_project_id_from_auth(self, auth):
+        """Extract tenant information from auth dict.
+
+        Returns a valid tenant_id if it exists, or None if not specified.
+        """
+        tenant_id = auth.get('tenantId')
+        if tenant_id and len(tenant_id) > CONF.max_param_size:
+            raise exception.ValidationSizeError(attribute='tenantId',
+                                                size=CONF.max_param_size)
+
+        tenant_name = auth.get('tenantName')
+        if tenant_name and len(tenant_name) > CONF.max_param_size:
+            raise exception.ValidationSizeError(attribute='tenantName',
+                                                size=CONF.max_param_size)
+
+        if tenant_name:
+            try:
+                tenant_ref = self.assignment_api.get_project_by_name(
+                    tenant_name, CONF.identity.default_domain_id)
+                tenant_id = tenant_ref['id']
+            except exception.ProjectNotFound as e:
+                raise exception.Unauthorized(e)
+        return tenant_id
+
+    def _get_user(self, access_key_dict):
+        access_key_id = access_key_dict['accessKeyCredentials']['accessKey']
+        access_key_secret = access_key_dict['accessKeyCredentials']['secret']
+
+        return self.identity_api.authenticate_ak(access_key_id, access_key_secret)
 
     @controller.v2_deprecated
-    def authenticate(self, context, credentials=None):
+    def authenticate(self, context, accesskey=None):
 
-        if 'accesskey' not in credentials:
+        if 'accessKeyCredentials' not in accesskey:
             raise exception.Unauthorized(message='Invalid access key authentication request')
 
-        creds_ref = self._get_credentials(credentials['accesskey'])
+        user_ref = self._get_user(accesskey)
+        user_ref = {'default_project_id': user_ref.get('default_project_id'),
+                    'domain_id': user_ref.get('domain_id'),
+                    'enabled': user_ref.get('enabled'),
+                    'id': user_ref.get('id'),
+                    'name': user_ref.get('name'),
+                    'email': user_ref.get('email')}
+        user_ref = self.v3_to_v2_user(user_ref)
 
-        tenant_ref = self.assignment_api.get_project(creds_ref['tenant_id'])
+        tenant_ref = {}
+        metadata_ref = {}
+        roles_ref = {}
+        catalog_ref = {}
+
+        expiry = core.default_expire_time()
+        bind = None
+
+        '''tenant_ref = self.assignment_api.get_project(creds_ref['tenant_id'])
         user_ref = self.identity_api.get_user(creds_ref['user_id'])
         metadata_ref = {}
         metadata_ref['roles'] = (
@@ -195,7 +246,7 @@ class AccessKeyController(AccessKeyControllerCommon, controller.V2Controller):
         # might be consumed external to Keystone and this is a v2.0 controller.
         # The token provider does not explicitly care about user_ref version
         # in this case, but the data is stored in the token itself and should
-        # match the version
+        # match the version'''
         user_ref = self.v3_to_v2_user(user_ref)
         auth_token_data = dict(user=user_ref,
                                tenant=tenant_ref,
@@ -219,11 +270,10 @@ class AccessKeyController(AccessKeyControllerCommon, controller.V2Controller):
         return super(AccessKeyController, self).get_credentials(user_id)
 
     @controller.v2_deprecated
-    def create_credential(self, context, user_id, tenant_id):
+    def create_credential(self, context, user_id, tenant_id=None):
         if not self._is_admin(context):
             self._assert_identity(context, user_id)
-        return super(AccessKeyController, self).create_credential(context, user_id,
-                                                                  tenant_id)
+        return self.identity_api.create_access_key(user_id)
 
     @controller.v2_deprecated
     def delete_credential(self, context, user_id, credential_id):

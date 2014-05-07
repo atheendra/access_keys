@@ -229,6 +229,9 @@ class TokenNotFound(NotFound):
 class UserNotFound(NotFound):
     message_format = _("Could not find user, %(user_id)s.")
 
+class AccessKeyNotFound(NotFound):
+    message_format = _("Could not find access key, %(access_key)s.")
+
 
 class GroupNotFound(NotFound):
     message_format = _("Could not find group, %(group_id)s.")

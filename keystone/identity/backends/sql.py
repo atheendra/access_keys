@@ -121,6 +121,8 @@ class Identity(identity.Driver):
         user_ref = None
         try:
             user_ref = self._get_user_from_ak(session, access_key_id)
+        except exception.AccessKeyNotFound:
+            raise AssertionError(_('Invalid access key'))
         except exception.UserNotFound:
             raise AssertionError(_('Invalid access key'))
         if not self._check_access_key_secret(session, access_key_secret, access_key_id):
@@ -131,6 +133,9 @@ class Identity(identity.Driver):
 
     def _get_user_from_ak(self, session, access_key_id):
         access_key_ref = session.query(AccessKey).get(access_key_id)
+        if not access_key_ref:
+            raise exception.AccessKeyNotFound
+
         user_ref = session.query(User).get(access_key_ref.get('user_id'))
 
         if not user_ref:
@@ -155,6 +160,7 @@ class Identity(identity.Driver):
     def create_access_key(self, user_id):
         access_key_id = None
         session = sql.get_session()
+        #TODO Atheendra: check for valid user ID
 
         #Generate unique Access Key
         while self._check_duplicate_access_key(session, access_key_id):
@@ -172,8 +178,19 @@ class Identity(identity.Driver):
 
         with session.begin():
             session.add(access_key_ref)
-        return access_key_secret
+        return {'access_key': access_key_id,
+                'secret': access_key_secret}
 
+    def delete_access_key(self, access_key_id):
+        session = sql.get_session()
+        with session.begin():
+            query = session.query(AccessKey)
+            try:
+                query = query.filter_by(id=access_key_id)
+                access_key_ref = query.one()
+                session.delete(access_key_ref)
+            except sql.NotFound:
+                raise exception.ValidationError(_("Access Key ID invalid"))
 
     @sql.handle_conflicts(conflict_type='user')
     def create_user(self, user_id, user):

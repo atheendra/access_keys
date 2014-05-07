@@ -77,23 +77,6 @@ class Auth(controller.V2Controller):
 
         Alternatively, this call accepts auth with only a token and tenant
         that will return a token that is scoped to that tenant.
-
-        Also:
-        Authenticate credentials and return a token.
-
-        Accept auth as a dict that looks like::
-
-            {
-                "auth":{
-                    "accessKeyCredentials":{
-                        "username":"test_user",
-                        "accessKey":"myaccesskey",
-                        "tenantName":"customer-x"
-                    }
-                }
-            }
-
-        Since access keys cannot be unscoped, tenantName is compulsory
         """
 
         if auth is None:
@@ -312,9 +295,8 @@ class Auth(controller.V2Controller):
         Returns auth_token_data, (user_ref, tenant_ref, metadata_ref)
         """
         if 'passwordCredentials' not in auth:
-            return self._authenticate_ak(context, auth)
-            #raise exception.ValidationError(
-            #    attribute='passwordCredentials', target='auth')
+            raise exception.ValidationError(
+                attribute='passwordCredentials', target='auth')
 
         if "password" not in auth['passwordCredentials']:
             raise exception.ValidationError(
